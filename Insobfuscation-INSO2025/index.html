@@ -1,0 +1,611 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Insobfuscation - Insomni'hack 2025</title>
+    <style>
+        body {
+            background-color: #1e1e1e;
+            color: #ffffff;
+            font-family: Arial, sans-serif;
+            font-size: 20px;
+            margin: 40px;
+            line-height: 1.6;
+        }
+        h1, h2 {
+            text-align: center;
+            text-decoration: underline;
+            color: #FF6347;
+        }
+        h1 {
+            margin-bottom: 20px;
+        }
+        h3, h4 {
+            color: #8A2BE2;
+        }
+        h5 {
+            color: red;
+        }
+        img {
+            display: block;
+            margin: 20px auto;
+            max-width: 80%;
+            border-radius: 8px;
+            box-shadow: 0 0 10px rgba(255, 255, 255, 0.2);
+        }
+        .guess {
+            color: #FFD700;
+        }
+        .content {
+            max-width: 1500px;
+            margin: auto;
+        }
+        .code-block {
+            background: #ffffff;
+            color: #333;
+            padding: 15px;
+            border-radius: 5px;
+            overflow-x: auto;
+            font-family: "Courier New", monospace;
+            box-shadow: 0 0 5px rgba(255, 255, 255, 0.1);
+        }
+        a {
+            display: block;
+            text-align: center;
+            color: #9cdcfe;
+            margin-top: 20px;
+            text-decoration: none;
+        }
+        a:hover {
+            text-decoration: underline;
+        }
+        table {
+            width: 80%; /* Set width for table */
+            margin: 30px auto; /* Center the table */
+            border-collapse: collapse; /* Merge table borders */
+            border: 2px solid #ccc; /* Light border around the table */
+            border-radius: 10px; /* Rounded corners */
+            background-color: #1e1e1e; /* Light background for the table */
+        }
+
+        th, td {
+            padding: 12px 20px; /* Add space within each cell */
+            text-align: left; /* Left-align text */
+            border-bottom: 1px solid #ddd; /* Light grey border between rows */
+        }
+
+        th {
+            background-color: #1e1e1e; /* Green background for the header */
+            color: white; /* White text in the header */
+            font-size: 20px;
+            font-weight: bold;
+        }
+
+        tr:nth-child(even) {
+            background-color: #1e1e1e; /* Light grey background for even rows */
+        }
+
+        caption {
+            font-size: 24px;
+            font-weight: bold;
+            margin-bottom: 10px;
+        }
+    </style>
+</head>
+<body>
+
+    <div class="content">
+        <h1>Insobfuscation</h1>
+        
+        <h2>TLDR</h2>
+        <p>We were dealing with a binary that was asking for user input. With this input it was then filling a Sudoku grid in a peculiar way during the call to the first virtualized function and was checking for the grid correctness in the second virtualized function. It was possible to reverse just the first function and be able to figure out what was going on, and what input we were supposed to give to the binary.</p>
+        <p>
+        Congratulations to those who solved it, and for those who were able to dump the bytecode and the shuffling map. There were quite a few handlers, and coding a disassembler to reconstruct the original meaning of the code can take quite some time.</p>
+        <p>
+        In this writeup I tried to use ChatGPT to see how one could have solved the challenge using it. I was quite impressed by the python code produced to retrieve the original function assembly code starting with only the bytecode. It was correct on its first try, and it took not so much time, in almost one hour I was able to achieve the disassembly of the bytecode.</p>
+        <p>
+        I know that there is some better way to do it, so I would be more than happy if you could share how you did it :).</p>
+        <p>
+        Source code can be found here: <a href="https://github.com/reversing-stuff/code-example/tree/main/Insobfuscation-INSO2025">https://github.com/reversing-stuff/code-example/tree/main/Insobfuscation-INSO2025</a>
+        </p>
+        <p>
+        In the main.cpp there is the command used to compile the binary. You can try to recompile it but this time without stripping it ;).
+        </p>
+        
+        <h2>Static analysis</h2>
+        <h3>Detect It Easy</h3>
+        
+        <img src="img/image001.png" alt="DetectItEasy">
+        <p>Using Detect It Easy we observe that the binary is a 64bit ELF, compiled with GCC and is written in C/C++. So far so good, nothing to worry about, we can continue with Ghidra.</p>
+
+        <h3>Ghidra</h3>
+        <h4>Main</h4>
+        <img src="img/image003.png" alt="Main">
+        <h5>Tinkering points</h5>
+        <ul>
+            <li>Block 1 and 2 share similitudes, they call FUN_00107f08, then FUN_0118322, then one or multiple times FUN_001051f2, then FUN_0010530a and finally FUN_001184f6.</li>
+            <li>In each of blocks 1 and 2 the first argument for every function is local_568 for the first block and local_2e8 for the second block.</li>
+            <li>In block 3 we see that FUN_00105650 is called with our two variables.</li>
+        </ul>
+
+        <h5>Inference & Deduction</h5>
+        <p>As we are dealing with C++ code (we can see the usage of cout in another code excerpt) we can make some educated guesses about what we are dealing with in the main function.</p>
+        <ul>
+            <li>FUN_00107f08 which is the first function called is a Class Constructor, which take an integer as input, we can see that the first time it is called it is with argument 0 and the second time with argument 1, maybe this it to differentiate between two phases(Spoiler: and indeed it is. It used this to get the correct shufflingmap/bytecode).</li>
+            <li>Local_568 and local_2e8 are the famous “this” variable, and therefore the calling convention is __thiscall.</li>
+            <li>FUN_00105650 is the Class Destructor.</li>
+        </ul>
+
+        <h4>FUN_00118322</h4>
+        <img src="img/image005.png" alt="FUN_00118322">
+        <img src="img/image007.png" alt="FUN_001187f0">
+        <h5>Tinkering points</h5>
+        <ul>
+            <li>The function FUN_00118322 is just a wrapper around the function FUN_001187f0.</li>
+            <li>Parameter_1 is an array of 0xf elements.</li>
+            <li>FUN_001187f0 is a setter. It will set the class structure located at offset +0x20 with the value from parameter_1.</li>
+            <li>We can see that the elements are referenced using * 8, which suggests that each element is 64bit.</li>
+        </ul>
+        <h5>Inference & Deduction</h5>
+        <p>These two functions save the value of a 0xf elements array into a class array.</p>
+        <h4>FUN_001051f2</h4>
+        <img src="img/image009.png" alt="FUN_001051f2">
+        <h5>Tinkering points</h5>
+        <ul>
+            <li>This function is a setter, it takes an offset as parameter_1 and a value as parameter_2.</li>
+        </ul>
+        <h5>Inference & Deduction</h5>
+        <p>We know that the first variable of our unknown class is probably an array of at least 0xe elements as our two function calls set the member 0xd and 0xe, with respectively our user input at index 0xd and an address at 0xe.</p>
+        <p>During the second phase, we see that the same function is called with the same address. This time we are not calling it again with our user input.</p>
+        <div class="guess">
+            <p>Guess:<br/>
+            During the first phase we do something with our user input and the address used, maybe it stores our user input at that address, or at some offset from this address. And the second phase will check if everything that has been filled at that address is correct.
+            </p>
+        </div>  
+
+        <h4>FUN_001184f6</h4>
+        <img src="img/image011.png" alt="FUN_001184f6">
+        <img src="img/image013.png" alt="FUN_0011883c">
+
+
+        <h5>Tinkering points</h5>
+        <ul>
+            <li>FUN_0011883c does the exact opposite of FUN_001187f0 which was a setter. So, this function is a getter.</li>
+            <li>We have a different function for element 0 of our array of 16 elements. This function is also a getter but for the same structure as the one used in FUN_001051f2. But this time we don’t get the 0xe or 0xd elements, but the elements 0.</li>
+        </ul>
+        <h5>Inference & Deduction</h5>
+        <p>This function restores our saved array, with the peculiarities that elements 0 is fetched from a different location and as you can see from the end of the second phase, this value will be tested<br/>
+        <img src="img/image015.png" alt="FUN_0011883c"></p>
+
+        <div class="guess">
+            <p>
+            Guess:<br/>
+            This is fetching the result a function call, likely fetching the result, which is stored in RAX in common cases, but this time RAX is symbolized with elements 0 of our class structures array.
+            </p>
+        </div>
+
+        <h4>Sum up</h4>
+        <p>If we take the main function again, we can say this:</p>
+        <img src="img/image016.png" alt="main">
+
+        <h5>Tinkering points</h5>
+        <ul>
+            <li>Block 1 is the constructor</li>
+            <li>Block 2 is the backup phase</li>
+            <li>Block 3 is the initialization phase</li>
+            <li>Block 4 is the execution phase</li>
+            <li>Block 5 restores and fetches results from point 4</li>
+            <li>It repeats two times</li>
+        </ul>
+
+        <h4>FUN_10530a</h4>
+        <img src="img/image018.png" alt="FUN_10530a">
+        <h5>Tinkering points</h5>
+        <ul>
+            <li>Local_38 is a function pointer initialized to “nullptr”. We can say this because later it is used like this: <img src="img/image020.png" alt="FUN_10530a"></li>
+            <li>FUN_0010521a is a getter of the variable at offset +400.</li>
+            <li>The variable is used as the value to find in the associative container at +0x238, this can be a map, an unoreder_map, a set, etc. Something wich store its elements as <Key, Value>, due to the presence of the method find.</li>
+            <li>It returns an iterator in local_40 which is then deferenced in the next line. lVar4 contains the line matching the key stored in local_48.</li>
+            <li>The first value is then accessed using lVar4 +4 and the second one later using lVar4+8, which suggest that our class structure at +0x238 is an associative container whose key is an int, and posesses two values, so it may possesses an std:pair element as value. With the first element being also 4 bytes.</li>
+            <li>The process repeats, but this times we use the second element of the pair to set a variables as opposed to the first element of the pair in the first case.</li>
+            <img src="img/image022.png" alt="">
+            <li>This is the implementation of std::vector::size().</li>
+            <li>So local_30 is an element of a std::vector. Which will be bound checked against uVar6 which is the element at index +0x180 set previously and get in FUN_0010524.</li>
+            <li>uVar2 is a pointer to a std::array at +0x278 and uVar5 is an element in it. Local_30 is the result of the at method with index uVar5. We check the size of it to know if the element uVar6 is in range, meaning that we have an std::vector of std::vector at index +x0278.</li>
+        </ul>
+
+        <h4>Putting everything together</h4>
+        <p>We begin by Getting a value stored at +400, which is used as a key for our map at +0x238. From our map we retrieve a std::pair, which will be used to set variable at +0x188 and +0x198.</p>
+        <p>
+        The variable at +0x188 is used to index an std::vector(+0x278) with each element being another std::vector. We retrieve this element of our vector and we check if our variable at +0x180 is within its range. If not we exit. Then we fetch the content of our inner std::vector using FUN_00105c86 which map the data method of std::vector.</p>
+        <p>
+        The variable 0x180 is an index in the inner std::vector. We use it to access its element here: <img src="img/image024.png" alt=""></p>
+        <p>
+        Element that we will XOR with our variable at +0x198. We can assume that this variable acts as a key and rename the functions accordingly.</p>
+        <p>
+        Its next usage will be with our function pointer discussed previously, local_38. It will be used as index in our array of function pointer DAT_0014d2e0 initialised to 0, but changed in some parts of the code, notabely in this function <img src="img/image025.png" alt=""></p>
+        <p>If we analyze the function which are called before we have: <img src="img/image026.png" alt="">
+        </p>
+        <p>
+            <img src="img/image027.png" alt="">
+        </p>
+        <p>
+            <img src="img/image028.png" alt="">
+        </p>
+        <p>
+            <img src="img/image029.png" alt="">
+        </p>
+        <p>
+            Basically, all these functions do is initialize our array of functions pointer DAT_0014d2e0. They register different values, for example here we have 0x12, 0x42 and 0xbb with different matching functions pointer. All these functions pointed to by our function’s pointer are virtual functions which are derived from a base class.
+        </p>
+
+        <p>
+            Next we have: <img src="img/image031.png" alt="">
+        </p>
+        <h5>Tinkering points</h5>
+        <ul>
+            <li>Block 1: check for completion by getting the variable at +0x199</li>
+            <li>Block 2: virtual function call. The function associated with the byte in our inner std::vector</li>
+            <li>Block 3: Do the same stuff as we already discussed, it fetches a line in oud outer std::vector, then XOR its byte at the position determined by the variable +0x180</li>
+        </ul>
+        <h5>Inference & Deduction</h5>
+        <p>We are in the presence of a Virtual Machine, more precisely in the dispatcher while loop.</p>
+        <p>Our handler table is the array DAT_0014d2e0, and our bytecode is in a std::vector&lt;std::vector&gt; at +0x278. Each line of this vector is the representation of an instruction, for example an add instructions. The bytes representing our instructions are XORed, at least one of them, the one which determines the associated handler, namely the Opcode. Our byte array is related to another structure at +0x238 which is a map &lt;idx0, (idx1, XORKey)&gt;. Idx0 is used to fetch the corresponding (idx1, XORKey) pair. Idx1 is used to fetch a line in our byte array which is something like this {{Instructions 0 bytes}, {Instructions 1 bytes}, …}, so it is fetching the Instructions to execute. Either it is sequential, or it can be in random order. Only a dynamic analysis can tell us now.</p>
+        <p>Initially our handler table was empty, and we saw that it is registering opcode one by one when needed. To start with we already have bytes 0x12, 0x42 and 0xbb registered. We will have to see with what handler they are associated with later.</p>
+
+        <h2>Dynamic analysis</h2>
+        <h3>Objectives</h3>
+        <ol>
+            <li>Dump the structure at +0x238.</li>
+            <li>Dump our byte array at +0x278.</li>
+            <li>Match opcodes to handler.</li>
+        </ol>
+
+        <h3> Objective 1: dumping structure at +0x238.</h3>
+        <p>
+          To dump this first structure, we set a breakpoint at this line <br/>
+          <img src="img/image033.png" alt="">
+        </p>
+        <p>
+            Stepping one time we got <br/> <img src="img/image035.png" alt="">
+        </p>
+
+        <p>
+            $rax points to the “this” and $rbx points to our std::map. 
+        </p>
+        <p>
+            To correctly dump the structure, we have to understand how it is laid out in memory. This structure uses a red black tree, and we have the following: <br/> <img src="img/image036.png" alt="">
+        </p>
+        <p>
+            The first rectangle is the address of the first node, and the second rectangle is the size of the structure. Here 0x11b which is equal to 283, so our element will go from 0->282
+        </p>
+        <p>
+            Here is the script to dump the structure in gdb <br/><img src="img/image038.png" alt="">
+        </p>
+        <p>
+            To use it:
+            <ul>
+                <li> source print_map.txt</li>
+                <li> print_map</li>
+            </ul>
+        </p>
+
+        <h3>Objective 2: dumping byte array at +0x278</h3>
+        <p> Same as before, set a breakpoint here:<br/><img src="img/image040.png" alt=""> <br/><img src="img/image042.png" alt="">
+        </p>
+        <p>Then enter these commands:
+            <ul>
+                <li>set logging file bytearray.txt</li>
+                <li>set logging on</li>
+                <li>x/1132gx 0x00005555555bcc50</li>
+            </ul>
+        </p>
+        <p>
+           We use the fact that the related map structure had 283 elements, here we see that each element is stored in the heap, the smallest bin, and we must multiply the number of elements by 4 to get them all. 
+        </p>
+        <h4>Making sense of it</h4>
+        <p>We have something like this <br/><img src="img/image044.png" alt=""></p>
+
+        <p>It means that the first instruction to be executed(idx:0) is located at idx 42 in our bytearray, and all bytes have been xored with key 142. The next instruction, idx:1 is at idx 185 in our bytearray and has beend xored with key 192.</p>
+        <p>We have to write a python script to recover the original code, which means that we will have to unxor all bytes and place them in the correct order.</p>
+
+
+        <p>Using the python script reconstruct_bytearray.py that you can find in the github repo, we can retrieve the original bytecode.<br/>
+
+        <img src="img/image046.png" alt="">
+        </p>
+        <p>Now all we have to do is understand each opcode/instruction.</p>
+
+        <h3>Objective3: Matching opcodes to handlers</h4>
+        <p>Using the script here dump_opcode_gandler.gdb we can easily get some opcodes with their corresponding handlers. It takes quite a long time due to the nature of the program and the fact that the AntiDebug handler will redirect execution to a random instruction instead of quitting. </p>
+        <p>
+        But even if we let the script run for 1-2 minutes, we will have enough to start our handlers reversing process, as you can see in the dump opcodeToHandler.txt.</p>
+        <p>
+        In this dump we will have access to the 0xC4 opcode’s handler, which is the famous AntiDebug one. Knowing this we can patch it by changing the return value of the test, tricking it into believing that we are not debugging it.
+        </p>
+        <p>
+        Note that there are Dispatcher instructions, which act differently according to the next byte, the one just after the opcode. But in our dump we will have them, and by manually reversing them we will figure it out.
+        </p>
+        <p>
+        After some time reversing the handlers which are simple as they do few instructions, are not obfuscated, and are written directly in C++, we can list them in the table below:
+        <table>
+            <tr>
+                <th>Handler</th>
+                <th>Byte</th>
+            </tr>
+            <tr>
+                <td>MovDispatcherHandler</td>
+                <td>0x12</td>
+            </tr>
+            <tr>
+                <td>MovDispatcherHandler</td>
+                <td>0x42</td>
+            </tr>
+            <tr>
+                <td>MovRegisterRegister</td>
+                <td>0x13</td>
+            </tr>
+            <tr>
+                <td>MoveRegisterConstant</td>
+                <td>0x14</td>
+            </tr>
+            <tr>
+                <td>EndHandler</td>
+                <td>0x66</td>
+            </tr>
+            <tr>
+                <td>EndHandler</td>
+                <td>0x40</td>
+            </tr>
+            <tr>
+                <td>AntiDebugHandler</td>
+                <td>0xc4</td>
+            </tr>
+            <tr>
+                <td>AddDisptacherHandler</td>
+                <td>0x87</td>
+            </tr>
+            <tr>
+                <td>AddDisptacherHandler</td>
+                <td>0x41</td>
+            </tr>
+            <tr>
+                <td>AddRegisterRegisterHandler</td>
+                <td>0x89</td>
+            </tr>
+            <tr>
+                <td>AddRegisterRegisterHandler</td>
+                <td>0x07</td>
+            </tr>
+            <tr>
+                <td>AddRegisterConstantHandler</td>
+                <td>0x88</td>
+            </tr>
+            <tr>
+                <td>SubDisptacherHandler</td> 
+                <td>0x1C</td>
+            </tr>
+            <tr>
+                <td>SubRegisterRegisterHandler</td>
+                <td>0x1D</td>
+            </tr>
+            <tr>
+                <td>SubRegisterConstantHandler</td>
+                <td>0x1E</td>
+            </tr>
+            <tr>
+                <td>MulDispatcherHandler</td>
+                <td>0x9F</td>
+            </tr>
+            <tr>
+                <td>MulRegisterRegisterHandler</td>
+                <td>0x9E</td>
+            </tr>
+            <tr>
+                <td>MulRegisterConstantHandler</td>
+                <td>0x9D</td>
+            </tr>
+            <tr>
+                <td>IncHandler</td>
+                <td>0x72</td>
+            </tr>
+            <tr>
+                <td>DecHandler</td>
+                <td>0x48</td>
+            </tr>
+            <tr>
+                <td>XorHandler</td>
+                <td>0x2E</td>
+            </tr>
+            <tr>
+                <td>XorRegisterRegisterHandler</td>
+                <td> 0x2F</td>
+            </tr>
+            <tr>
+                <td>XorRegisterConstantHandler</td>
+                <td>0x30</td>
+            </tr>
+            <tr>
+                <td>ANDHandler</td>
+                <td>0x5F</td>
+            </tr>
+            <tr>
+                <td>SHLHandler</td>
+                <td>0x68</td>
+            </tr>
+            <tr>
+                <td>SHLHandler</td>
+                <td>0x46</td>
+            </tr>
+            <tr>
+                <td>SHRHandler</td>
+                <td>0x67</td>
+            </tr>
+            <tr>
+                <td>SARHandler</td>
+                <td>0x69</td>
+            </tr>
+            <tr>
+                <td>SARHandler</td>
+                <td>0x44</td>
+            </tr>
+            <tr>
+                <td>CMPHandler</td>
+                <td>0x7F</td>
+            </tr>
+            <tr>
+                <td>CMPHandler</td>
+                <td>0x71</td>
+            </tr>
+            <tr>
+                <td>CMPConstantHandler</td>
+                <td>0x61</td>
+            </tr>
+            <tr>
+                <td>CMPRegisterHandler</td>
+                <td>0x7e</td>
+            </tr>
+            <tr>
+                <td>JLHandler</td>
+                <td>0x3C</td>
+            </tr>
+            <tr>
+                <td>JLEHandler</td>
+                <td>0x36</td>
+            </tr>
+            <tr>
+                <td>JGHandler</td>
+                <td>0xDE</td>
+            </tr>
+            <tr>
+                <td>JZHandler</td>
+                <td>0x96</td>
+            </tr>
+            <tr>
+                <td>JNZHandler</td>
+                <td>0x95</td>
+            </tr>
+            <tr>
+                <td>CALL_INHandler</td>
+                <td>0xAA</td>
+            </tr>
+            <tr>
+                <td>CALL_OUTHandler</td>
+                <td>0xBB</td>
+            </tr>
+            <tr>
+                <td>NOPHandler</td>
+                <td>0xCC</td>
+            </tr>
+            <tr>
+                <td>NOPHandler</td>
+                <td>0xCA</td>
+            </tr>
+            <tr>
+                <td>LDRHandler</td>
+                <td>0xDD</td>
+            </tr>
+            <tr>
+                <td>LDRHandler</td>
+                <td>0x45</td>
+            </tr>
+            <tr>
+                <td>LDRHandler</td>
+                <td>0x43</td>
+            </tr>
+            <tr>
+                <td>LDRHandler</td>
+                <td>0xD0</td>
+            </tr>
+            <tr>
+                <td>STRConstantHandler</td>
+                <td>0xEE</td>
+            </tr>
+            <tr>
+                <td>STRRegisterHandler</td>
+                <td>0xEB</td>
+            </tr>
+            <tr>
+                <td>JMPHandler</td>
+                <td>0x22</td>
+            </tr>
+            <tr>
+                <td>IMULHandler</td>
+                <td>0x24</td>
+            </tr>
+            <tr>
+                <td>LOT</td>
+                <td>0x9</td>
+            </tr>
+            <tr>
+                <td>LOT2</td>
+                <td>0x8</td>
+            </tr>
+        </table>
+
+
+        <h2>Post Processing</h2>
+        <h3>Objectives</h3>
+        <p>
+            <ul>
+                <li>Convert our raw bytecode to pseudo ASM</li>
+                <li>Convert our pseudo ASM to C</li>
+            </ul>
+        </p>
+        <h3>Objective 1: Convert our raw bytecode to pseudo ASM</h3>
+        
+        <p> You can find all python code used here:  <a href="https://github.com/reversing-stuff/code-example/tree/main/Insobfuscation-INSO2025/scripts">https://github.com/reversing-stuff/code-example/tree/main/Insobfuscation-INSO2025/scripts</a></p>
+
+        <p>
+            From the first script we got:<br/><img src="img/pseudo-asm.png" alt="">
+        </p>
+
+        <p> Next we have to:
+            <ol>
+                <li>Replace all jump instructions numbers, using a label, e.g JMP 10 becomes JUMP line_10</li>
+                <li>Replace all LOT and LOT2 with their corresponding actions.</li>
+                <li>Replace all [number] with a corresponding register. e.g 0 for RAX, 1 for RBX, 13 for parameter_2, 14 for parameter_1, local_x for the other</li>
+                <li>Keep numbers without brakcets alone</li>
+            </ol>
+        </p>
+        <p>
+            From the next python scripts we got:<br/><img src="img/pseudo-asm2.png" alt="">
+        </p>
+        
+        <h3>Objective 2: Convert our pseudo ASM to C</h3>
+        <p>When we are done writing our ASM code back, we can, if we want compile it back, and decompile it with Ghidra to have a clear C representation. This step is not needed, but if you like visualizing pseudo C rather than ASM, you can do it.</p>
+        <p> We end up with: <br/><img src="img/pseudo-c.png" alt=""></p>
+
+        <p>And when asking ChatGPT what this code is doing, even though we could have figured it out ourself:<br/><img src="img/gpt-answer.png" alt=""></p>
+        <p>Indeed, this code is filling a 9 by 9 sudoku grid, which we can find here in the main function, during the phase where it sets up the arguments for our virtualized function:<img src="img/image047.png" alt=""> </p>
+        <p>Remembering that we have to deal with int values so each number is 4 bytes.</p>
+
+
+
+        <h2>Solving it</h2>
+        <h3>Objectives</h3>
+        <p>
+            <ul>
+                <li>Write a python sudoku resolver </li>
+                <li>Understand how our input is used to fill the grid</li>
+                <li> PWNING IT!</li>
+            </ul>
+        </p>
+        <p>Testing our input we got <br/><img src="img/image049.png" alt=""></p>
+        
+
+
+
+
+        <h2>What about the second virtualized function?</h2>
+        <p>The second function is responsible for checking if the sudoku grid is valid. We can reverse it to understand what we were dealing with, but if we understood that the first function was dealing with a sudoku grid, it was enough to get the flag.</p>
+
+        <h2>Conclusion</h2>
+        <p>I hope you enjoyed the challenge, even though reversing and obtaining the real ASM code back can get a bit tedious at times! :D</p>
+
+        <a href="../index.html">← Back to root</a>
+    </div>
+
+</body>
+</html>

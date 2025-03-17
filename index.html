@@ -1,0 +1,54 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Root</title>
+    <style>
+        body {
+            background-color: #1e1e1e;
+            color: #d4d4d4;
+            font-family: Arial, sans-serif;
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            justify-content: center;
+            height: 100vh;
+            text-align: center;
+        }
+        h1 {
+            margin-bottom: 20px;
+        }
+        .links {
+            display: flex;
+            flex-direction: column;
+            gap: 10px;
+        }
+        a {
+            color: #9cdcfe;
+            text-decoration: none;
+            font-size: 1.2em;
+        }
+        a:hover {
+            text-decoration: underline;
+        }
+    </style>
+</head>
+<body>
+    <h1>Publications</h1>
+    <div class="links">
+        <script>
+            const pages = [
+                "Insobfuscation-INSO2025/index.html"
+            ];
+            const container = document.querySelector('.links');
+            pages.forEach(page => {
+                let link = document.createElement('a');
+                link.href = page;
+                link.textContent = page.replace('.html', '');
+                container.appendChild(link);
+            });
+        </script>
+    </div>
+</body>
+</html>
